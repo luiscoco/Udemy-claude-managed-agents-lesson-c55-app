@@ -1,0 +1,29 @@
+{
+  "source": "live-provider-commentary",
+  "sessionId": "sesn_01SGC9iKznByh5Z7zhZ2Naeb",
+  "answer": "This local experiment, titled **\"Offline Testing and Evals,\"** demonstrates a fixture-based testing pattern where a single fixture adapter is used per run and a shared consumer is executed against it. The score (\"passed\") is strictly bound to the fixture's own evidence \u2014 confirmed message and terminal lifecycle assertions \u2014 rather than any external or remote integration. It explicitly notes that model quality was not measured, keeping the contract narrow and the evidence source transparent.",
+  "stopReason": "end_turn",
+  "eventTypes": [
+    "session.status_running",
+    "session.thread_status_running",
+    "user.message",
+    "span.model_request_start",
+    "agent.thinking",
+    "agent.message",
+    "span.model_request_end",
+    "session.thread_status_idle",
+    "session.usage",
+    "session.status_idle"
+  ],
+  "requestUsage": [
+    {
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "input_tokens": 598,
+      "output_tokens": 125,
+      "speed": "standard"
+    }
+  ],
+  "experimentHash": "885dd4f188cec0c50a0a3ea0ed51ff0449e08ac564e0f04782a74153c3743318",
+  "scope": "A real text-only model response about the local experiment. External integrations and the experiment's correctness are not certified by this response."
+}

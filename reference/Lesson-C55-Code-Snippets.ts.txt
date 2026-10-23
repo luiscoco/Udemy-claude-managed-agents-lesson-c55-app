@@ -1,0 +1,103 @@
+// Provider-behind-a-port example with SDK-shaped authored fixtures.
+import type Anthropic from "@anthropic-ai/sdk";
+import type { BetaManagedAgentsStreamSessionEvents as StreamEvent } from "@anthropic-ai/sdk/resources/beta/sessions/events";
+export interface ManagedPort {
+  readonly source: "authored-fixture" | "managed-api";
+  create(signal: AbortSignal): Promise<{ id: string }>;
+  open(id: string, signal: AbortSignal): Promise<AsyncIterable<StreamEvent>>;
+  send(id: string, prompt: string, signal: AbortSignal): Promise<void>;
+}
+export const fixtureEvents: StreamEvent[] = [
+  { id: "fixture-running", type: "session.status_running", processed_at: "2026-01-01T00:00:00Z" },
+  { id: "fixture-message", type: "agent.message", content: [{ type: "text", text: "Authored fixture answer" }],
+    processed_at: "2026-01-01T00:00:01Z" },
+  { id: "fixture-message", type: "agent.message", content: [{ type: "text", text: "Authored fixture answer" }],
+    processed_at: "2026-01-01T00:00:01Z" },
+  { id: "fixture-idle", type: "session.status_idle", stop_reason: { type: "end_turn" }, stop_details: null,
+    processed_at: "2026-01-01T00:00:02Z" }
+];
+export class FixturePort implements ManagedPort {
+  readonly source = "authored-fixture" as const;
+  opened = false; sent = false;
+  async create(signal: AbortSignal) { signal.throwIfAborted(); return { id: "fixture-session" }; }
+  async open(id: string, signal: AbortSignal) {
+    if (id !== "fixture-session") throw new Error("Unknown fixture session");
+    signal.throwIfAborted(); this.opened = true;
+    const owner = this;
+    return { async *[Symbol.asyncIterator]() {
+      if (!owner.sent) throw new Error("Fixture task was not sent");
+      for (const event of fixtureEvents) { signal.throwIfAborted(); yield structuredClone(event); }
+    } };
+  }
+  async send(id: string, prompt: string, signal: AbortSignal) {
+    signal.throwIfAborted();
+    if (id !== "fixture-session" || !this.opened || !prompt.trim()) throw new Error("Invalid fixture send");
+    this.sent = true;
+  }
+}
+export class LivePort implements ManagedPort {
+  readonly source = "managed-api" as const;
+  client: Anthropic; agent: { id: string; version: number }; environmentId: string;
+  constructor(client: Anthropic, agent: { id: string; version: number }, environmentId: string) {
+    this.client = client; this.agent = agent; this.environmentId = environmentId;
+  }
+  async create(signal: AbortSignal) {
+    const session = await this.client.beta.sessions.create({ agent: { type: "agent", ...this.agent },
+      environment_id: this.environmentId, budget: { type: "limit", max_list_cost: { amount: "10", currency: "USD" } }
+    }, { maxRetries: 0, timeout: 10000, signal });
+    return { id: session.id };
+  }
+  async open(id: string, signal: AbortSignal) {
+    const stream = await this.client.beta.sessions.events.stream(id, {}, { signal, timeout: 60000 });
+    return { async *[Symbol.asyncIterator]() {
+      try { for await (const event of stream) yield event; }
+      finally { stream.controller.abort(); }
+    } };
+  }
+  async send(id: string, prompt: string, signal: AbortSignal) {
+    await this.client.beta.sessions.events.send(id, { events: [{ type: "user.message",
+      content: [{ type: "text", text: prompt }] }] }, { maxRetries: 0, timeout: 10000, signal });
+  }
+}
+export async function runHost(port: ManagedPort, prompt: string, signal: AbortSignal,
+  ledger: { sessionId?: string; phase?: string }) {
+  const result = { source: port.source, terminal: "incomplete", text: "", uniqueEvents: 0 };
+  const seen = new Map<string, string>();
+  try {
+    ledger.phase = "creating";
+    const session = await port.create(signal); ledger.sessionId = session.id;
+    const stream = await port.open(session.id, signal);
+    await port.send(session.id, prompt, signal); ledger.phase = "observing";
+    let count = 0;
+    for await (const event of stream) {
+      if (++count > 200) break;
+      if (event.type === "event_start" || event.type === "event_delta") continue;
+      const fingerprint = JSON.stringify(event);
+      if (seen.has(event.id)) {
+        if (seen.get(event.id) !== fingerprint) throw new Error("Conflicting fixture/canonical event");
+        continue;
+      }
+      seen.set(event.id, fingerprint); result.uniqueEvents++;
+      if (event.type === "agent.message") {
+        result.text = event.content.filter(b => b.type === "text").map(b => b.text).join("");
+        if (result.text.length > 8000) throw new Error("Output limit");
+      }
+      if (event.type === "session.error") { result.terminal = "error"; break; }
+      if (event.type === "session.status_idle") {
+        result.terminal = event.stop_reason.type === "end_turn" ? "end_turn" : "blocked"; break;
+      }
+    }
+    ledger.phase = result.terminal;
+  } catch { ledger.phase = "needs_reconciliation"; result.terminal = "incomplete"; }
+  return result;
+}
+export function scoreHostRun(result: Awaited<ReturnType<typeof runHost>>) {
+  const checks = { sourceLabeled: result.source === "authored-fixture", ended: result.terminal === "end_turn",
+    exactFixtureText: result.text === "Authored fixture answer", deduplicated: result.uniqueEvents === 3 };
+  return { checks, passed: Object.values(checks).every(Boolean), modelQuality: "not_measured" };
+}
+// One FixturePort instance per run. No SDK client is constructed automatically.
+// Authored fixtures test host contracts, not Claude quality, latency, invoice cost,
+// deployed permissions or live API availability. Score labels remain fixture-specific.
+// Real runners need authenticated ownership, durable ledgers/checkpoints, bounded
+// signal deadlines, history recovery and explicit remote cleanup; local close is not stop.

@@ -1,0 +1,13 @@
+{
+  "lesson": "C55",
+  "title": "Offline Testing and Evals",
+  "path": "lesson-c55\\lesson-c55-app",
+  "port": 3055,
+  "scenarios": 3,
+  "state": "implemented and verified",
+  "liveScope": "text-only commentary about the local result",
+  "typecheck": true,
+  "localTests": true,
+  "browserSmoke": "passed: desktop, mobile, scenario controls, source view",
+  "liveCommentarySmoke": "passed: real text-only session reached end_turn"
+}
