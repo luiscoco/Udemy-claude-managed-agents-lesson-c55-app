@@ -42,26 +42,78 @@ CLAUDE_MANAGED_ENVIRONMENT_ID=your_environment_id
 PORT=3055
 ```
 
-## How the application was developed
+## How the app was build
 
-The browser collects inputs; the Node host validates requests; the lesson implementation produces observable evidence. The architecture page walks through the real source with numbered steps, prerequisite configuration, source filenames and code excerpts.
+### 1. Preserve fixture provenance
 
-### Lesson implementation
+An authored event sequence cannot be relabelled as a live observation. The early rejection protects the meaning of every later assertion.
 
-[src/lesson.ts](https://github.com/luiscoco/Udemy-claude-managed-agents-lesson-c55-app/blob/main/src/lesson.ts)
+Source: [src/lesson.ts](src/lesson.ts#L13)
 
 ```typescript
-  async run(input) {
-
-if(text(input,"fixtureLabel")!=="authored")return report("rejected","An authored fixture cannot be relabelled as a live observation",{},["Preserve evidence provenance"]);
-const sequence=list(input,"sequence").map(String),completed=sequence.includes("end_turn"),paused=sequence.includes("requires_action")&&!completed;
-return report(completed?"passed":paused?"paused":"incomplete","Scored only the fixture-specific host contract",{completed,source:"authored fixture",assertions:{sawMessage:sequence.includes("message"),sawTerminal:completed},modelQuality:"not measured"},["Use one fixture adapter per run","Execute the shared consumer","Require terminal lifecycle evidence","Keep the score bound to its evidence source"]);
-
-  }
-};
+if (text(input, "fixtureLabel") !== "authored")
+  return report(
+    "rejected",
+    "An authored fixture cannot be relabelled as a live observation",
+    {},
+    ["Preserve evidence provenance"],
+  );
 ```
 
-Read the architecture page for the remaining source excerpts and explanations, including input handling and optional provider behavior. The diagram describes this application, rather than implying that an external integration has been implemented.
+### 2. Score lifecycle evidence without claiming model quality
+
+end_turn permits completion, requires_action pauses an otherwise unfinished sequence, and truncation remains incomplete. The result records message/terminal assertions while modelQuality stays not measured; this reducer scores a supplied fixture sequence.
+
+Source: [src/lesson.ts](src/lesson.ts#L14) · selected statements
+
+```typescript
+const sequence = list(input, "sequence").map(String),
+  completed = sequence.includes("end_turn"),
+  paused = sequence.includes("requires_action") && !completed;
+
+return report(
+  completed ? "passed" : paused ? "paused" : "incomplete",
+  "Scored only the fixture-specific host contract",
+  {
+    completed,
+    source: "authored fixture",
+    assertions: {
+      sawMessage: sequence.includes("message"),
+      sawTerminal: completed,
+    },
+    modelQuality: "not measured",
+  },
+  [
+    "Use one fixture adapter per run",
+    "Execute the shared consumer",
+    "Require terminal lifecycle evidence",
+    "Keep the score bound to its evidence source",
+  ],
+);
+```
+
+### Check your understanding
+
+Run **A completed authored host run** in the application. Compare the result with these scenario expectations:
+
+```json
+{
+  "input": {
+    "sequence": [
+      "running",
+      "message",
+      "end_turn"
+    ],
+    "fixtureLabel": "authored"
+  },
+  "expectedOutcome": "passed",
+  "checkEvidence": {
+    "completed": true
+  }
+}
+```
+
+Then try **A truncated authored host run**. Its expected outcome is `incomplete`; identify the condition or evidence field that explains the difference.
 
 ## Validation
 
